@@ -191,21 +191,57 @@ class StyleLearner:
     # ── main entry points ─────────────────────────────────────────
 
     def learn(self) -> dict:
-        """Read all published articles and build style profiles per type."""
+        """Read all published articles and build style profiles per type.
+
+        Uses the feedback-approved article list when available; falls back
+        to using all published articles if no feedback has been recorded yet.
+        """
         if not self.published_dir.exists():
             return {"xiaobai": {}, "deep_tech": {}}
 
+        # Load existing profile (which contains _approved / _rejected feedback)
+        existing = self.load()
+        approved_dict = existing.get("_approved", {})
+        rejected_dict = existing.get("_rejected", {})
+        approved_xiaobai = set(approved_dict.get("xiaobai", []))
+        approved_deep_tech = set(approved_dict.get("deep_tech", []))
+        rejected_xiaobai = set(rejected_dict.get("xiaobai", []))
+        rejected_deep_tech = set(rejected_dict.get("deep_tech", []))
+
+        # Use feedback if any user feedback exists
+        has_feedback = bool(
+            approved_xiaobai or approved_deep_tech
+            or rejected_xiaobai or rejected_deep_tech
+        )
+
         xiaobai_features = []
         deep_tech_features = []
+        skipped = []
 
         for f in sorted(self.published_dir.glob("*.md")):
             text = f.read_text(encoding="utf-8")
             features = self.extract_features(text)
             article_type = self._classify(f.name, text)
-            if article_type == "deep_tech":
-                deep_tech_features.append(features)
+
+            if has_feedback:
+                if article_type == "deep_tech":
+                    # Skip only if explicitly rejected
+                    if f.name in rejected_deep_tech:
+                        skipped.append(f.name)
+                    else:
+                        # Either approved or never reviewed → include
+                        deep_tech_features.append(features)
+                else:
+                    if f.name in rejected_xiaobai:
+                        skipped.append(f.name)
+                    else:
+                        xiaobai_features.append(features)
             else:
-                xiaobai_features.append(features)
+                # No feedback yet — include all
+                if article_type == "deep_tech":
+                    deep_tech_features.append(features)
+                else:
+                    xiaobai_features.append(features)
 
         profile = {
             "xiaobai": self._aggregate(xiaobai_features),
@@ -213,6 +249,72 @@ class StyleLearner:
         }
 
         return profile
+
+    def record_feedback(
+        self,
+        filename: str,
+        article_type: str,
+        approved: bool,
+        text: str | None = None,
+        score: float | None = None,
+    ) -> dict:
+        """Record user feedback on a published article.
+
+        If approved=True, the article is added to the stable profile.
+        If approved=False, the article is recorded but not used in scoring.
+
+        This implements feedback-driven profile evolution — the system
+        gets smarter with each post you mark as "good".
+        """
+        # Load existing profile (which keeps _approved / _rejected intact)
+        existing = self.load()
+        approved_dict = existing.get("_approved", {"xiaobai": [], "deep_tech": []})
+        rejected_dict = existing.get("_rejected", {"xiaobai": [], "deep_tech": []})
+        history = existing.get("_history", [])
+
+        # Move from one bucket to another if necessary
+        for bucket in (approved_dict, rejected_dict):
+            if filename in bucket.get(article_type, []):
+                bucket[article_type].remove(filename)
+
+        target = approved_dict if approved else rejected_dict
+        if article_type not in target:
+            target[article_type] = []
+        if filename not in target[article_type]:
+            target[article_type].append(filename)
+
+        # Record history entry
+        history.append({
+            "filename": filename,
+            "article_type": article_type,
+            "approved": approved,
+            "score": score,
+            "recorded_at": datetime.now().isoformat(),
+        })
+
+        # Persist feedback into the profile file
+        existing["_approved"] = approved_dict
+        existing["_rejected"] = rejected_dict
+        existing["_history"] = history[-50:]  # keep last 50 events
+        # Preserve the existing computed profile; only rebuild if missing
+        if not existing.get("xiaobai") and not existing.get("deep_tech"):
+            new_profile = self.learn()
+            existing["xiaobai"] = new_profile.get("xiaobai", {})
+            existing["deep_tech"] = new_profile.get("deep_tech", {})
+        self.save(existing)
+
+        # Recompute profile from current feedback
+        new_profile = self.learn()
+        existing["xiaobai"] = new_profile.get("xiaobai", {})
+        existing["deep_tech"] = new_profile.get("deep_tech", {})
+        self.save(existing)
+
+        return {
+            "filename": filename,
+            "article_type": article_type,
+            "approved": approved,
+            "new_sample_size": new_profile.get(article_type, {}).get("sample_size", 0),
+        }
 
     def _classify(self, filename: str, text: str) -> str:
         """Classify an article as xiaobai or deep_tech based on filename/content."""

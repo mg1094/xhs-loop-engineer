@@ -73,7 +73,7 @@ class StyleScorer:
         sent_lengths = [len(s) for s in sentences]
         para_lines = [len(p.split("\n")) for p in paragraphs]
 
-        punct_count = {"？": 0, "！": 0, "。": 0, "...:": 0, "其他": 0}
+        punct_count = {"？": 0, "！": 0, "。": 0, "其他": 0}
         for s in sentences:
             if "？" in s:
                 punct_count["？"] += 1
@@ -81,8 +81,6 @@ class StyleScorer:
                 punct_count["！"] += 1
             elif "。" in s:
                 punct_count["。"] += 1
-            elif "..." in s or "…" in s:
-                punct_count["..."] += 1
             else:
                 punct_count["其他"] += 1
 
