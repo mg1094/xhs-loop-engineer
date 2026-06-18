@@ -1,76 +1,174 @@
 # XHS Loop Engineer
 
-> 小红书内容自动化工作流 — Loop Engineering 实战项目
+> Xiaohongshu content automation — A Loop Engineering hands-on project
 
-## 🎯 一句话
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10+-blue.svg" alt="Python">
+  <img src="https://img.shields.io/badge/License-MIT-green.svg" alt="License">
+  <img src="https://img.shields.io/badge/Loop-Engineering-orange.svg" alt="Loop Engineering">
+  <img src="https://img.shields.io/badge/uv-package%20manager-purple.svg" alt="uv">
+</p>
 
-用 Loop Engineering 的方式，把「选题 → 写稿 → 验证 → 归档 → 通知」的小红书内容生产流程自动化。
+---
 
-## 🧠 核心理念
+## 🎯 One-liner
 
-Loop Engineering：**不要做那个手动提示 Agent 的人。去设计一个自动调度 Agent 的系统。**
+Automate your Xiaohongshu content pipeline — topic discovery → content generation → quality verification → Obsidian archiving — using Loop Engineering.
+
+## 🧠 What is Loop Engineering?
+
+> **Stop being the person who prompts the agent. Design the system that does it for you.**
+
+Loop Engineering sits one floor above prompt engineering. Instead of chatting with an AI for every article, you build a system that:
+
+1. Wakes up on a schedule
+2. Finds trending topics
+3. Generates content in your voice
+4. Verifies quality against your style guide
+5. Saves to your Obsidian vault
+6. Sends you a notification
+
+You review and publish. The loop handles the rest.
+
+## 🏗️ Architecture
 
 ```
-定时触发（每天早上 8 点）
-    ↓
-Agent 1: 选题发现 → 3 个候选选题
-    ↓
-⚡ 人工确认（选一个）
-    ↓
-Agent 2: 内容生成 → 正文 + 标题 + 标签
-    ↓
-Agent 3: 质量验证 → 敏感词 / 风格 / 字数
-    ↓
-Agent 4: 归档 + 通知 → Obsidian + 推送
-    ↓
-verifyCompletion: 你确认发布了吗？
-    ↓ No → 收集反馈 → Agent 2 重写
-    ↓ Yes → 归档 + 结束本轮
+┌─────────────────────────────────────────────────┐
+│                  Outer Loop                      │
+│                                                  │
+│  Trigger (daily 8 AM / manual)                   │
+│         ↓                                        │
+│  ┌──────────────────────────────────────────┐    │
+│  │ Agent 1: Topic Finder                     │    │
+│  │ Reads Obsidian topic pool + dashboard     │    │
+│  │ Output: 3 candidate topics                │    │
+│  └──────────────┬───────────────────────────┘    │
+│                 ↓                                 │
+│          ⚡ Human checkpoint (pick one)            │
+│                 ↓                                 │
+│  ┌──────────────────────────────────────────┐    │
+│  │ Agent 2: Content Writer                   │    │
+│  │ Style-driven content generation           │    │
+│  │ Output: body + title + tags               │    │
+│  └──────────────┬───────────────────────────┘    │
+│                 ↓                                 │
+│  ┌──────────────────────────────────────────┐    │
+│  │ Agent 3: Quality Checker                  │    │
+│  │ Forbidden words / structure / tags        │    │
+│  │ Output: pass / needs revision             │    │
+│  └──────────────┬───────────────────────────┘    │
+│                 ↓                                 │
+│  ┌──────────────────────────────────────────┐    │
+│  │ Agent 4: Archiver + Notifier              │    │
+│  │ Saves to Obsidian → Desktop notification  │    │
+│  └──────────────────────────────────────────┘    │
+│                                                  │
+│  verifyCompletion: Ready to publish?             │
+│    No → Inject feedback → Agent 2 retries        │
+│    Yes → Archive + End loop                      │
+└─────────────────────────────────────────────────┘
 ```
 
-## 🏗️ 目录结构
+## 📁 Project Structure
 
 ```
 xhs-loop-engineer/
-├── loop.py                 # Loop 主循环
+├── loop.py                    # Main loop controller
 ├── agents/
-│   ├── topic_finder.py     # Agent 1: 选题发现
-│   ├── content_writer.py   # Agent 2: 内容生成
-│   ├── quality_checker.py  # Agent 3: 质量验证
-│   └── archiver.py         # Agent 4: 归档通知
+│   ├── topic_finder.py        # Agent 1: Topic discovery
+│   ├── content_writer.py      # Agent 2: Content generation
+│   ├── quality_checker.py     # Agent 3: Quality verification
+│   └── archiver.py            # Agent 4: Archive + notify
 ├── config/
-│   ├── style.yaml          # 风格指南
-│   └── schedule.yaml       # 发布计划
+│   ├── style.yaml             # Style guide (persona, forbidden words, structure)
+│   └── schedule.yaml          # Schedule config (frequency, Obsidian paths)
 ├── prompts/
-│   ├── topic_finder.md     # 选题发现 prompt
-│   ├── content_writer.md   # 内容生成 prompt
-│   └── quality_checker.md  # 质量验证 prompt
+│   ├── topic_finder.md        # Topic discovery prompt template
+│   ├── content_writer.md      # Content generation prompt template
+│   └── quality_checker.md     # Quality verification prompt template
 ├── state/
-│   └── loop_state.json     # Loop 状态
-├── output/                 # 生成内容输出
-├── requirements.txt
+│   └── loop_state.json        # Persistent loop state
+├── output/                    # Generated content output
+├── pyproject.toml             # Project metadata + dependencies (uv)
+├── requirements.txt           # pip-compatible fallback
 └── README.md
 ```
 
-## 🚀 快速开始
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Python 3.10+
+- [uv](https://github.com/astral-sh/uv) (recommended package manager)
+- [Obsidian](https://obsidian.md/) vault at `~/Documents/Obsidian Vault`
+- macOS (for desktop notifications) or Linux
+
+### Install
 
 ```bash
-pip install -r requirements.txt
+git clone git@github.com:mg1094/xhs-loop-engineer.git
+cd xhs-loop-engineer
+
+# Install dependencies with uv
+uv sync
+source .venv/bin/activate
+```
+
+### Configure
+
+Edit `config/style.yaml` to match your persona and content rules.
+
+Edit `config/schedule.yaml` to set your Obsidian vault path and publishing schedule.
+
+### Run
+
+```bash
 python loop.py
 ```
 
-## 📋 你的工作流
+## 📋 Your Daily Workflow
 
 ```
-早 8 点 → 收到通知「今天有 3 个选题，选一个？」
-       → 你回复「选 2」
-       → Agent 写稿 → 验证通过
-       → 收到通知「稿子已写好，在 Obsidian」
-       → 你打开看一眼，复制到小红书发布
-       → 回复「已发」
-       → Agent 归档 + 更新数据看板
+8:00 AM → Run python loop.py
+         → Agent 1 shows 3 candidate topics
+         → You pick one
+         → Agent 2 generates content
+         → Agent 3 verifies quality
+         → Agent 4 saves to Obsidian + desktop notification
+         → You open Obsidian, review, copy to Xiaohongshu
+         → Publish
+         → Done
 ```
+
+## 🔧 Configuration
+
+### style.yaml
+
+Defines your content persona:
+
+- `forbidden_words` — Words that must never appear
+- `preferred_words` — Tone and vocabulary preferences
+- `structure` — Article structure template
+- `article_types` — Separate rules for beginner posts vs deep-tech posts
+
+### schedule.yaml
+
+Defines your workflow:
+
+- `frequency` — How often to publish
+- `obsidian.vault_path` — Path to your Obsidian vault
+- `notification` — Desktop notification settings
+
+## 🛠️ Built With
+
+- Python 3.10+
+- [uv](https://github.com/astral-sh/uv) — Fast Python package manager
+- [Obsidian](https://obsidian.md/) — Local Markdown-based knowledge base
+
+## 🌐 Languages
+
+[简体中文](README_CN.md)
 
 ## 📄 License
 
-MIT
+MIT © [mg1094](https://github.com/mg1094)
