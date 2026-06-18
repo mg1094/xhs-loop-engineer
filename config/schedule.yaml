@@ -1,14 +1,14 @@
-# 发布计划
+# Publishing schedule and LLM provider presets
 
 schedule:
-  frequency: "每周 2-3 篇"
-  days: ["周一", "周三", "周五"]
+  frequency: "weekly 2-3 posts"
+  days: ["monday", "wednesday", "friday"]
   time: "19:00-21:00"
   timezone: "Asia/Shanghai"
 
 article_mix:
-  xiaobai: 2    # 小白文每周 2 篇
-  deep_tech: 1  # 技术深度稿每周 1 篇
+  xiaobai: 2
+  deep_tech: 1
 
 obsidian:
   vault_path: "/Users/mac/Documents/Obsidian Vault"
@@ -19,5 +19,50 @@ obsidian:
 
 notification:
   method: "desktop"
-  title_template: "📝 小红书新稿子已生成"
-  body_template: "选题：{topic}\n字数：{word_count}\n位置：Obsidian → 小红书/待发布/"
+  title_template: "📝 Xiaohongshu post ready"
+  body_template: "Topic: {topic}\nChars: {word_count}\nLocation: Obsidian → 小红书/待发布/"
+
+# ─────────────────────────────────────────────────────────────
+# LLM provider presets — pick one and export the env vars
+# ─────────────────────────────────────────────────────────────
+llm_providers:
+  anthropic:
+    backend: "anthropic"
+    model: "claude-sonnet-4-6"
+    api_key_env: "ANTHROPIC_API_KEY"
+    note: "Best quality, pay-as-you-go"
+
+  doubao:
+    backend: "openai"
+    api_base: "https://ark.cn-beijing.volces.com/api/v3"
+    model: "doubao-pro-32k"
+    api_key_env: "OPENAI_API_KEY"
+    note: "ByteDance Doubao — good Chinese, very cheap"
+
+  qwen:
+    backend: "openai"
+    api_base: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    model: "qwen-max"
+    api_key_env: "OPENAI_API_KEY"
+    note: "Alibaba Qwen — strongest Chinese benchmark"
+
+  deepseek:
+    backend: "openai"
+    api_base: "https://api.deepseek.com/v1"
+    model: "deepseek-chat"
+    api_key_env: "OPENAI_API_KEY"
+    note: "DeepSeek — extremely cheap, good reasoning"
+
+  glm:
+    backend: "openai"
+    api_base: "https://open.bigmodel.cn/api/paas/v4"
+    model: "glm-4-plus"
+    api_key_env: "OPENAI_API_KEY"
+    note: "Zhipu GLM-4 — strong Chinese"
+
+  moonshot:
+    backend: "openai"
+    api_base: "https://api.moonshot.cn/v1"
+    model: "moonshot-v1-128k"
+    api_key_env: "OPENAI_API_KEY"
+    note: "Moonshot Kimi — 128k context"
