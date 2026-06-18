@@ -1,14 +1,19 @@
 """
-Loop 主循环 — XHS Loop Engineer
-小红书内容自动化工作流
+Loop Controller — XHS Loop Engineer
+Xiaohongshu content automation workflow.
 
-Loop Engineering 核心理念：
-  不要手动提示 Agent。设计一个系统自动调度 Agent。
+Loop Engineering core principle:
+  Don't prompt the agent manually. Design a system that does it for you.
+
+Modes:
+  - interactive: Human-in-the-loop (pick topics, review content)
+  - auto: Fully automated (LLM generates → self-verify → retry → archive)
 """
 
 import yaml
 import json
-import time
+import argparse
+import os
 from pathlib import Path
 from datetime import datetime
 
@@ -19,9 +24,20 @@ from agents.archiver import Archiver
 
 
 class XHSLoopEngineer:
-    def __init__(self, config_path: str = "config/schedule.yaml"):
+    def __init__(
+        self,
+        config_path: str = "config/schedule.yaml",
+        mode: str = "interactive",
+        backend: str = "manual",
+        model: str = None,
+    ):
         with open(config_path) as f:
             self.config = yaml.safe_load(f)
+
+        self.mode = mode
+        self.backend = backend
+        self.model = model
+
         self.topic_finder = TopicFinder(config_path)
         self.content_writer = ContentWriter(config_path)
         self.quality_checker = QualityChecker()
@@ -29,6 +45,9 @@ class XHSLoopEngineer:
 
         self.state_file = Path("state/loop_state.json")
         self.state = self._load_state()
+        self.max_retries = 3
+
+    # ── state management ──────────────────────────────────────────
 
     def _load_state(self) -> dict:
         if self.state_file.exists():
@@ -38,132 +57,163 @@ class XHSLoopEngineer:
     def _save_state(self):
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.state["iterations"] = self.state.get("iterations", 0) + 1
-        self.state_file.write_text(json.dumps(self.state, indent=2, ensure_ascii=False))
+        self.state_file.write_text(
+            json.dumps(self.state, indent=2, ensure_ascii=False)
+        )
 
-    def verify_completion(self) -> tuple[bool, str]:
-        """
-        验证本轮是否完成。
-        Loop Engineering 的核心：用验证函数驱动循环，而不是无限运行。
-        """
-        # 检查是否已达到今日配额
-        today = datetime.now().strftime("%Y-%m-%d")
-        last_run = self.state.get("last_run_date", "")
-        if last_run == today:
-            return True, f"今日已完成（{today}），等待明天触发"
-
-        # 检查是否有待处理任务
-        pending_dir = Path("output")
-        pending = list(pending_dir.glob("*.md")) if pending_dir.exists() else []
-        if pending:
-            return False, f"有 {len(pending)} 个待发布内容"
-
-        return False, "等待用户选择选题"
+    # ── step 1: topic discovery ───────────────────────────────────
 
     def step_1_find_topics(self) -> dict:
-        """Step 1: 选题发现"""
-        print("\n🔍 Agent 1: 选题发现...")
+        """Run Agent 1: Topic Finder."""
+        print("\n🔍 Agent 1: Topic Discovery...")
         result = self.topic_finder.run()
         print(f"   {result['message']}")
         return result
 
+    # ── step 2: topic selection (interactive) ─────────────────────
+
     def step_2_user_select(self, topic_result: dict) -> str:
-        """Step 2: 用户选择选题（人工介入点）"""
-        print("\n⚡ 请在以下选题中选择：")
-        print(f"   选题池共 {len(topic_result['topic_pool'])} 个待写选题")
-        for i, topic in enumerate(topic_result["topic_pool"][:5], 1):
-            print(f"   {i}. {topic}")
+        """Human picks a topic (interactive mode only)."""
+        print("\n⚡ Pick a topic:")
+        all_topics = topic_result["topic_pool"][:5]
+        if not all_topics:
+            print("   No pending topics. Enter a new one.")
+            return input("\n👉 New topic: ").strip()
 
-        choice = input("\n👉 输入选题编号（或输入新选题）: ").strip()
+        for i, t in enumerate(all_topics, 1):
+            print(f"   {i}. {t}")
 
+        choice = input("\n👉 Number (or type a new topic): ").strip()
         try:
             idx = int(choice) - 1
-            if 0 <= idx < len(topic_result["topic_pool"]):
-                return topic_result["topic_pool"][idx]
+            if 0 <= idx < len(all_topics):
+                return all_topics[idx]
         except ValueError:
             pass
+        return choice
 
-        return choice  # 用户输入的新选题
+    def step_2_auto_select(self, topic_result: dict) -> str:
+        """Auto-pick the first topic (auto mode)."""
+        if topic_result["topic_pool"]:
+            return topic_result["topic_pool"][0]
+        return "AI 工具推荐 — 最新实用工具合集"
 
-    def step_3_generate_content(self, topic: str) -> dict:
-        """Step 3: 内容生成"""
-        print(f"\n✍️ Agent 2: 内容生成...")
-        print(f"   选题: {topic}")
+    # ── step 3: content generation ────────────────────────────────
 
-        # 判断类型
-        article_type = "deep_tech" if any(
-            kw in topic.lower() for kw in ["源码", "架构", "深度", "拆解", "技术"]
-        ) else "xiaobai"
+    def step_3_generate(
+        self, topic: str, article_type: str = None
+    ) -> dict:
+        """Run Agent 2: Content Writer (with LLM backend)."""
+        if article_type is None:
+            article_type = (
+                "deep_tech"
+                if any(
+                    kw in topic.lower()
+                    for kw in ["源码", "架构", "深度", "拆解", "技术"]
+                )
+                else "xiaobai"
+            )
 
-        result = self.content_writer.run(topic, article_type)
-        print(f"   Prompt 已构建，类型: {article_type}")
+        print(f"\n✍️  Agent 2: Content Generation ({self.backend})...")
+        print(f"   Topic: {topic}")
+        print(f"   Type:  {article_type}")
 
-        return {**result, "article_type": article_type}
+        result = self.content_writer.generate(
+            topic=topic,
+            article_type=article_type,
+            backend=self.backend,
+            model=self.model,
+        )
 
-    def step_4_verify_quality(self, content: str, article_type: str) -> dict:
-        """Step 4: 质量验证"""
-        print(f"\n🔍 Agent 3: 质量验证...")
+        if result["status"] == "error":
+            print(f"   ❌ {result['message']}")
+        elif result["status"] == "generated":
+            print(f"   ✅ Generated ({result['backend']}/{result.get('model', '?')})")
+        else:
+            print(f"   📋 {result['message']}")
+
+        return result
+
+    # ── step 3b: manual content input ─────────────────────────────
+
+    def step_3_manual_input(self) -> str:
+        """Read content from stdin (interactive fallback)."""
+        print("\n📋 Paste content below (type END on its own line to finish):")
+        lines = []
+        while True:
+            line = input()
+            if line.strip() == "END":
+                break
+            lines.append(line)
+        return "\n".join(lines)
+
+    # ── step 4: quality verification ──────────────────────────────
+
+    def step_4_verify(self, content: str, article_type: str) -> dict:
+        """Run Agent 3: Quality Checker."""
+        print(f"\n🔍 Agent 3: Quality Verification...")
         result = self.quality_checker.run(content, article_type)
 
         if result["pass"]:
-            print(f"   ✅ 通过 (评分: {result['score']}/10)")
+            print(f"   ✅ Passed (score: {result['score']}/10)")
         else:
-            print(f"   ❌ 未通过 (评分: {result['score']}/10)")
+            print(f"   ❌ Failed (score: {result['score']}/10)")
             for issue in result["issues"]:
                 print(f"      - {issue}")
 
         return result
 
-    def step_5_archive(self, content: str, topic: str, article_type: str) -> dict:
-        """Step 5: 归档通知"""
-        print(f"\n📦 Agent 4: 归档...")
+    # ── step 5: archive + notify ──────────────────────────────────
+
+    def step_5_archive(
+        self, content: str, topic: str, article_type: str
+    ) -> dict:
+        """Run Agent 4: Archiver + Notifier."""
+        print(f"\n📦 Agent 4: Archive + Notify...")
         result = self.archiver.run(content, topic, article_type)
         print(f"   {result['message']}")
         return result
 
-    def run_loop(self, max_iterations: int = 3):
-        """
-        主循环。
+    # ── main loop ─────────────────────────────────────────────────
 
-        Loop Engineering 的核心结构：
-        1. 选题 → 2. 确认 → 3. 生成 → 4. 验证 → 5. 归档
-        如果验证不通过 → 反馈 → 重新生成（最多 3 轮）
-        """
+    def run_interactive(self):
+        """Interactive mode: human-in-the-loop for every decision."""
         print("=" * 50)
-        print("🔄 XHS Loop Engineer 启动")
-        print(f"   当前迭代: {self.state.get('iterations', 0)}")
-        print(f"   已生成文章: {self.state.get('articles_generated', 0)}")
+        print("🔄 XHS Loop Engineer — Interactive Mode")
+        print(f"   Iterations: {self.state.get('iterations', 0)}")
+        print(f"   Articles:   {self.state.get('articles_generated', 0)}")
         print("=" * 50)
 
-        # Step 1: 选题发现
+        # Step 1: Find topics
         topics = self.step_1_find_topics()
 
-        # Step 2: 用户确认
+        # Step 2: Select topic
         selected_topic = self.step_2_user_select(topics)
 
-        # Step 3-5: 生成 → 验证 → 归档（带重试循环）
-        for attempt in range(max_iterations):
-            print(f"\n--- 第 {attempt + 1}/{max_iterations} 轮 ---")
+        # Step 3-5: Generate → Verify → Archive (with retries)
+        for attempt in range(self.max_retries):
+            print(f"\n--- Round {attempt + 1}/{self.max_retries} ---")
 
-            # Step 3: 生成
-            gen_result = self.step_3_generate_content(selected_topic)
+            # Step 3: Generate
+            gen_result = self.step_3_generate(selected_topic)
 
-            # 获取实际内容（从用户输入）
-            print("\n📋 请将 Claude 生成的内容粘贴到下方（输入 END 结束）:")
-            lines = []
-            while True:
-                line = input()
-                if line.strip() == "END":
-                    break
-                lines.append(line)
-            content = "\n".join(lines)
+            # Get content
+            if gen_result.get("content"):
+                content = gen_result["content"]
+            else:
+                content = self.step_3_manual_input()
 
-            # Step 4: 验证
-            verify_result = self.step_4_verify_quality(content, gen_result["article_type"])
+            if not content.strip():
+                print("   ⚠️  Empty content, skipping")
+                continue
 
-            if verify_result["pass"]:
-                # Step 5: 归档
-                archive_result = self.step_5_archive(
-                    content, selected_topic, gen_result["article_type"]
+            # Step 4: Verify
+            verify = self.step_4_verify(content, gen_result.get("type", "xiaobai"))
+
+            if verify["pass"]:
+                # Step 5: Archive
+                archive = self.step_5_archive(
+                    content, selected_topic, gen_result.get("type", "xiaobai")
                 )
                 self.state["articles_generated"] = (
                     self.state.get("articles_generated", 0) + 1
@@ -171,24 +221,165 @@ class XHSLoopEngineer:
                 self.state["last_run_date"] = datetime.now().strftime("%Y-%m-%d")
                 self._save_state()
 
-                print(f"\n✅ Loop 完成！")
-                print(f"   文件: {archive_result['filepath']}")
-                return archive_result
-            else:
-                print(f"\n🔄 验证未通过，进入下一轮重试...")
-                if attempt < max_iterations - 1:
-                    feedback = input("💬 输入修改意见（回车跳过）: ").strip()
-                    if feedback:
-                        self.state["feedback"] = feedback
+                print(f"\n✅ Loop complete!")
+                print(f"   File: {archive['filepath']}")
+                return archive
 
-        print(f"\n⚠️ 达到最大迭代次数 ({max_iterations})，请手动处理")
-        return {"status": "max_iterations_reached"}
+            # Failed verification — collect feedback and retry
+            if attempt < self.max_retries - 1:
+                feedback = input("\n💬 Revision feedback (Enter to skip): ").strip()
+                if feedback:
+                    selected_topic = f"{selected_topic} (revise: {feedback})"
 
+        print(f"\n⚠️  Max retries ({self.max_retries}) reached. Manual review needed.")
+        return {"status": "max_retries_reached"}
+
+    def run_auto(self):
+        """Auto mode: fully automated with self-verification and retry."""
+        print("=" * 50)
+        print("🤖 XHS Loop Engineer — Auto Mode")
+        print(f"   Backend: {self.backend}/{self.model or 'default'}")
+        print(f"   Iterations: {self.state.get('iterations', 0)}")
+        print(f"   Articles:   {self.state.get('articles_generated', 0)}")
+        print("=" * 50)
+
+        # Step 1: Find topics
+        topics = self.step_1_find_topics()
+
+        # Step 2: Auto-select
+        selected_topic = self.step_2_auto_select(topics)
+
+        # Step 3-5: Generate → Verify → Retry (automatic)
+        for attempt in range(self.max_retries):
+            print(f"\n--- Round {attempt + 1}/{self.max_retries} ---")
+
+            # Step 3: Generate via LLM
+            gen_result = self.step_3_generate(selected_topic)
+
+            if gen_result["status"] == "error":
+                print(f"   ⚠️  Generation failed, retrying...")
+                continue
+
+            if not gen_result.get("content"):
+                print(f"   ⚠️  No content returned, retrying...")
+                continue
+
+            content = gen_result["content"]
+
+            # Step 4: Verify
+            verify = self.step_4_verify(content, gen_result.get("type", "xiaobai"))
+
+            if verify["pass"]:
+                # Step 5: Archive
+                archive = self.step_5_archive(
+                    content, selected_topic, gen_result.get("type", "xiaobai")
+                )
+                self.state["articles_generated"] = (
+                    self.state.get("articles_generated", 0) + 1
+                )
+                self.state["last_run_date"] = datetime.now().strftime("%Y-%m-%d")
+                self._save_state()
+
+                print(f"\n✅ Auto loop complete!")
+                print(f"   File: {archive['filepath']}")
+                return archive
+
+            # Auto-retry with feedback injected
+            if attempt < self.max_retries - 1:
+                feedback = "; ".join(verify["issues"])
+                print(f"   🔄 Auto-retry with feedback: {feedback[:80]}...")
+                selected_topic = f"{selected_topic} (fix: {feedback[:100]})"
+
+        print(f"\n⚠️  Auto mode: max retries ({self.max_retries}) reached.")
+        return {"status": "max_retries_reached"}
+
+    def run(self):
+        """Entry point — dispatches to interactive or auto mode."""
+        if self.mode == "auto":
+            return self.run_auto()
+        return self.run_interactive()
+
+
+# ── CLI ───────────────────────────────────────────────────────────
 
 def main():
-    loop = XHSLoopEngineer()
-    result = loop.run_loop()
-    print(f"\n结果: {json.dumps(result, indent=2, ensure_ascii=False)}")
+    parser = argparse.ArgumentParser(
+        description="XHS Loop Engineer — Xiaohongshu content automation"
+    )
+    parser.add_argument(
+        "--mode",
+        choices=["interactive", "auto"],
+        default="interactive",
+        help="Run mode (default: interactive)",
+    )
+    parser.add_argument(
+        "--backend",
+        choices=["manual", "anthropic", "openai"],
+        default="manual",
+        help="LLM backend (default: manual)",
+    )
+    parser.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Model name (e.g., claude-sonnet-4-6, gpt-4o)",
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="config/schedule.yaml",
+        help="Path to config file",
+    )
+    parser.add_argument(
+        "--topic",
+        type=str,
+        default=None,
+        help="Skip topic discovery and use this topic directly",
+    )
+    parser.add_argument(
+        "--type",
+        dest="article_type",
+        choices=["xiaobai", "deep_tech"],
+        default=None,
+        help="Article type (auto-detected if not specified)",
+    )
+
+    args = parser.parse_args()
+
+    loop = XHSLoopEngineer(
+        config_path=args.config,
+        mode=args.mode,
+        backend=args.backend,
+        model=args.model,
+    )
+
+    # Fast path: --topic provided
+    if args.topic:
+        print(f"⚡ Fast path: generating for '{args.topic}'")
+        article_type = args.article_type or (
+            "deep_tech"
+            if any(
+                kw in args.topic.lower()
+                for kw in ["源码", "架构", "深度", "拆解", "技术"]
+            )
+            else "xiaobai"
+        )
+        gen_result = loop.step_3_generate(args.topic, article_type)
+        if gen_result.get("content"):
+            content = gen_result["content"]
+        else:
+            content = loop.step_3_manual_input()
+
+        verify = loop.step_4_verify(content, article_type)
+        if verify["pass"]:
+            loop.step_5_archive(content, args.topic, article_type)
+        else:
+            print("\n⚠️  Content did not pass verification:")
+            for issue in verify["issues"]:
+                print(f"   - {issue}")
+        return
+
+    loop.run()
 
 
 if __name__ == "__main__":

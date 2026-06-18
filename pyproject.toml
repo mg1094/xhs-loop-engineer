@@ -25,7 +25,12 @@ dependencies = [
 ]
 
 [project.scripts]
-xhs-loop = "loop:main"
+xhs-loop = "xhs_loop_engineer:main"
+
+[project.urls]
+Homepage = "https://github.com/mg1094/xhs-loop-engineer"
+Repository = "https://github.com/mg1094/xhs-loop-engineer"
+Issues = "https://github.com/mg1094/xhs-loop-engineer/issues"
 
 [build-system]
 requires = ["hatchling"]

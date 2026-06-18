@@ -1,0 +1,40 @@
+name: XHS Loop Engineer — Daily Content Generation
+
+on:
+  schedule:
+    # Runs at 8:00 AM Beijing time (UTC+8) every Monday, Wednesday, Friday
+    - cron: "0 0 * * 1,3,5"
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "Override topic (leave blank for auto-discovery)"
+        required: false
+        type: string
+      mode:
+        description: "Run mode"
+        required: false
+        default: "auto"
+        type: choice
+        options:
+          - auto
+          - interactive
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run XHS Loop Engineer
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          uv run python loop.py --mode auto --backend anthropic --model claude-sonnet-4-6
