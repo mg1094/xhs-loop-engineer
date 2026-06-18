@@ -20,6 +20,8 @@ from agents.topic_finder import TopicFinder
 from agents.content_writer import ContentWriter
 from agents.quality_checker import QualityChecker
 from agents.archiver import Archiver
+from agents.style_learner import StyleLearner
+from agents.style_scorer import StyleScorer
 
 
 class XHSLoopEngineer:
@@ -41,6 +43,8 @@ class XHSLoopEngineer:
         self.content_writer = ContentWriter(config_path)
         self.quality_checker = QualityChecker()
         self.archiver = Archiver(config_path)
+        self.style_learner = StyleLearner(config_path)
+        self.style_scorer = StyleScorer(config_path)
 
         self.state_file = Path("state/loop_state.json")
         self.state = self._load_state()
@@ -142,16 +146,37 @@ class XHSLoopEngineer:
     # ── step 4: quality verification ──────────────────────────────
 
     def step_4_verify(self, content: str, article_type: str) -> dict:
-        """Run Agent 3: Quality Checker."""
+        """Run Agent 3: Quality Checker + Style Scorer."""
         print(f"\n🔍 Agent 3: Quality Verification...")
         result = self.quality_checker.run(content, article_type)
 
         if result["pass"]:
-            print(f"   ✅ Passed (score: {result['score']}/10)")
+            print(f"   ✅ Rule check passed (score: {result['score']}/10)")
         else:
-            print(f"   ❌ Failed (score: {result['score']}/10)")
+            print(f"   ❌ Rule check failed (score: {result['score']}/10)")
             for issue in result["issues"]:
                 print(f"      - {issue}")
+
+        # Style similarity check (only if rules passed)
+        if result["pass"]:
+            print(f"   🎨 Style similarity check...")
+            style_result = self.style_scorer.score(content, article_type)
+            score = style_result["score"]
+            threshold = style_result.get("threshold", 0.70)
+            if style_result.get("reason") == "no_style_profile_yet":
+                print(f"   ⏭️  Skipped: {style_result['message']}")
+            elif style_result["passed"]:
+                print(f"   ✅ Style match: {score:.2f} (>= {threshold})")
+            else:
+                print(f"   ❌ Style mismatch: {score:.2f} (< {threshold})")
+                for dim, dim_score in style_result.get("dimension_scores", {}).items():
+                    print(f"      - {dim}: {dim_score:.2f}")
+                result["pass"] = False
+                result["issues"].append(
+                    f"Style similarity {score:.2f} below threshold {threshold}"
+                )
+                result["style_result"] = style_result
+            result["style_result"] = style_result
 
         return result
 
