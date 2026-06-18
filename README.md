@@ -100,29 +100,34 @@ xhs-loop-engineer/
 
 - Python 3.10+
 - [uv](https://github.com/astral-sh/uv) (recommended package manager)
+- Node.js 18+ (only for the Web UI)
 - [Obsidian](https://obsidian.md/) vault at `~/Documents/Obsidian Vault`
 - macOS (for desktop notifications) or Linux
 
-### Install
+### Option A — Web UI (recommended)
 
 ```bash
 git clone git@github.com:mg1094/xhs-loop-engineer.git
 cd xhs-loop-engineer
 
-# Install dependencies with uv
+# Backend
 uv sync
-source .venv/bin/activate
+# Frontend
+cd frontend && npm install && cd ..
+
+# Start both
+./start.sh
 ```
 
-### Configure
+Open <http://localhost:5173>.
 
-Edit `config/style.yaml` to match your persona and content rules.
-
-Edit `config/schedule.yaml` to set your Obsidian vault path and publishing schedule.
-
-### Run
+### Option B — CLI only
 
 ```bash
+git clone git@github.com:mg1094/xhs-loop-engineer.git
+cd xhs-loop-engineer
+uv sync
+source .venv/bin/activate
 python loop.py
 ```
 
@@ -161,9 +166,9 @@ Defines your workflow:
 
 ## 🛠️ Built With
 
-- Python 3.10+
-- [uv](https://github.com/astral-sh/uv) — Fast Python package manager
-- [Obsidian](https://obsidian.md/) — Local Markdown-based knowledge base
+**Backend:** Python 3.10+, [uv](https://github.com/astral-sh/uv), FastAPI, Pydantic
+**Frontend:** Vue 3, Vite, Tailwind CSS, Pinia, Vue Router
+**Storage:** [Obsidian](https://obsidian.md/) vault (local Markdown)
 
 ## 🌐 Languages
 
