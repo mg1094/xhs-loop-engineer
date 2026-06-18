@@ -1,21 +1,34 @@
 """
-Agent 4: 归档 + 通知
-将生成的内容写入 Obsidian，更新数据看板，发送桌面通知。
+Agent 4: Archiver + Notifier
+Saves generated content to Obsidian and sends desktop notifications.
 """
 
 import yaml
 import json
-import os
+import re
 import subprocess
 from pathlib import Path
 from datetime import datetime
 
 
+# Unicode emoji ranges — same conservative set as quality_checker
+_EMOJI_RE = re.compile(
+    "["
+    "\U0001F600-\U0001F64F"
+    "\U0001F300-\U0001F5FF"
+    "\U0001F680-\U0001F6FF"
+    "\U0001F700-\U0001F77F"
+    "\U0001F900-\U0001F9FF"
+    "\U0001FA00-\U0001FA6F"
+    "\U0001FA70-\U0001FAFF"
+    "\U00002600-\U000027BF"
+    "]+",
+    flags=re.UNICODE,
+)
+
+
 class Archiver:
-    def __init__(
-        self,
-        config_path: str = "config/schedule.yaml",
-    ):
+    def __init__(self, config_path: str = "config/schedule.yaml"):
         with open(config_path) as f:
             self.config = yaml.safe_load(f)
         self.vault = Path(
@@ -25,56 +38,50 @@ class Archiver:
     def save_to_obsidian(
         self, content: str, topic: str, article_type: str = "xiaobai"
     ) -> Path:
-        """保存内容到 Obsidian"""
-        # 生成文件名
-        article_num = len(list((self.vault / self.config["obsidian"]["published_dir"]).glob("*.md"))) + 1
-        slug = topic[:20].replace(" ", "-").replace("/", "-")
+        """Save content to a pending folder in the Obsidian vault."""
+        published_dir = self.vault / self.config["obsidian"]["published_dir"]
+        article_num = (
+            len(list(published_dir.glob("*.md"))) + 1 if published_dir.exists() else 1
+        )
+        slug = re.sub(r"[^\w\-]", "-", topic[:20]).strip("-")
         filename = f"{article_num:03d}-{slug}.md"
 
-        # 确定保存目录
         pending_dir = self.vault / "小红书" / "待发布"
         pending_dir.mkdir(parents=True, exist_ok=True)
 
-        # 写入 frontmatter
         date_str = datetime.now().strftime("%Y-%m-%d")
-        full_content = f"""---
-title: {filename}
-date: {date_str}
-tags:
-  - 待发布
-  - {article_type}
----
-
-{content}
-"""
+        frontmatter = (
+            "---\n"
+            f"title: {filename}\n"
+            f"date: {date_str}\n"
+            "tags:\n"
+            f"  - 待发布\n"
+            f"  - {article_type}\n"
+            "---\n\n"
+        )
 
         filepath = pending_dir / filename
-        filepath.write_text(full_content, encoding="utf-8")
+        filepath.write_text(frontmatter + content, encoding="utf-8")
         return filepath
 
     def update_dashboard(self, article_info: dict):
-        """更新数据看板"""
+        """Patch the dashboard markdown with the latest run metadata."""
         dashboard = self.vault / self.config["obsidian"]["dashboard_file"]
         if not dashboard.exists():
             return
 
         content = dashboard.read_text(encoding="utf-8")
         date_str = datetime.now().strftime("%Y-%m-%d")
-
-        # 在对应编号处更新发布日期
         article_num = article_info.get("num", "???")
-        update_line = f"| 发布日期 | {date_str} |"
 
-        # 简单替换
         new_content = content.replace(
             f"### {article_num} ·",
-            f"### {article_num} · {article_info.get('topic', '')}",
+            f"### {article_num} · {article_info.get('topic', '')} ({date_str})",
         )
-
         dashboard.write_text(new_content, encoding="utf-8")
 
     def send_notification(self, title: str, body: str):
-        """发送桌面通知"""
+        """Send a desktop notification (macOS-first, with Linux fallback)."""
         try:
             subprocess.run(
                 [
@@ -82,33 +89,33 @@ tags:
                     "-e",
                     f'display notification "{body}" with title "{title}"',
                 ],
+                check=True,
                 timeout=5,
             )
-        except Exception:
-            # macOS 通知失败时，用 terminal-notifier 或 echo
+        except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
             try:
                 subprocess.run(
                     ["terminal-notifier", "-title", title, "-message", body],
+                    check=True,
                     timeout=5,
                 )
-            except Exception:
+            except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                # Final fallback: stdout
                 print(f"\n📢 {title}\n{body}\n")
 
-    def run(self, content: str, topic: str, article_type: str = "xiaobai") -> dict:
-        """执行归档和通知"""
-        # 保存到 Obsidian
+    def run(
+        self, content: str, topic: str, article_type: str = "xiaobai"
+    ) -> dict:
+        """Save content, notify user, persist loop state."""
         filepath = self.save_to_obsidian(content, topic, article_type)
 
-        # 通知
         notif_config = self.config.get("notification", {})
-        title = notif_config.get("title_template", "📝 新稿子已生成")
+        title = notif_config.get("title_template", "📝 New draft ready")
         body = notif_config.get("body_template", "").format(
-            topic=topic,
-            word_count=len(content),
+            topic=topic, word_count=len(content)
         )
         self.send_notification(title, body)
 
-        # 更新状态文件
         state = {
             "last_run": datetime.now().isoformat(),
             "last_topic": topic,
@@ -123,5 +130,5 @@ tags:
             "filepath": str(filepath),
             "notification_sent": True,
             "status": "archived",
-            "message": f"已保存到 {filepath}，请前往 Obsidian 查看",
+            "message": f"Saved to {filepath} — open Obsidian to review",
         }

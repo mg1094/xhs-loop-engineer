@@ -1,6 +1,8 @@
-"""Package entry point for pyproject.toml [project.scripts]."""
+"""Script entry point — invoked by `xhs-loop` command."""
 
-from loop import main
+import sys
+
+from cli import main
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

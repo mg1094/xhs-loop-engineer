@@ -14,43 +14,18 @@ class QualityChecker:
             self.style = yaml.safe_load(f)
         self.forbidden_words = self.style["content_rules"]["forbidden_words"]
 
-        # Unicode emoji ranges: Emoticons, Symbols, Pictographs, Transport, etc.
+        # Conservative emoji range — only well-known emoji blocks.
+        # Avoid ranges that overlap with CJK (e.g. U+1F18E–U+1F251).
         self.emoji_pattern = re.compile(
             "["
-            "\U0001F600-\U0001F64F"  # emoticons
-            "\U0001F300-\U0001F5FF"  # symbols & pictographs
-            "\U0001F680-\U0001F6FF"  # transport & map
-            "\U0001F700-\U0001F77F"  # alchemical
-            "\U0001F780-\U0001F7FF"  # geometric shapes
-            "\U0001F800-\U0001F8FF"  # supplemental arrows-C
-            "\U0001F900-\U0001F9FF"  # supplemental symbols
-            "\U0001FA00-\U0001FA6F"  # chess symbols
-            "\U0001FA70-\U0001FAFF"  # symbols extended-A
-            "\U00002702-\U000027B0"  # dingbats
-            "\U000024C2-\U0001F251"  # enclosed characters
-            "\U0001F004-\U0001F0CF"  # playing cards
-            "\U0001F18E"             # negative squared AB
-            "\U0001F191-\U0001F19A"  # squared symbols
-            "\U0001F1E6-\U0001F1FF"  # flags
-            "\U00002328-\U0000232F"  # misc technical
-            "\U000023CF"             # eject
-            "\U000023E9-\U000023F3"  # double triangles
-            "\U000023F8-\U000023FA"  # control symbols
-            "\U000024C2"             # circled M
-            "\U000025AA-\U000025AB"  # squares
-            "\U000025B6"             # right triangle
-            "\U000025C0"             # left triangle
-            "\U000025FB-\U000025FE"  # medium squares
-            "\U00002600-\U000027EF"  # misc symbols
-            "\U00002934-\U00002935"  # arrows
-            "\U00002B05-\U00002B07"  # arrows
-            "\U00002B1B-\U00002B1C"  # squares
-            "\U00002B50"             # star
-            "\U00002B55"             # circle
-            "\U00003030"             # wavy dash
-            "\U0000303D"             # part alternation mark
-            "\U00003297"             # congratulations
-            "\U00003299"             # secret
+            "\U0001F600-\U0001F64F"  # Emoticons
+            "\U0001F300-\U0001F5FF"  # Misc Symbols and Pictographs
+            "\U0001F680-\U0001F6FF"  # Transport and Map
+            "\U0001F700-\U0001F77F"  # Alchemical
+            "\U0001F900-\U0001F9FF"  # Supplemental Symbols and Pictographs
+            "\U0001FA00-\U0001FA6F"  # Chess Symbols
+            "\U0001FA70-\U0001FAFF"  # Symbols and Pictographs Extended-A
+            "\U00002600-\U000027BF"  # Misc Symbols + Dingbats
             "]+",
             flags=re.UNICODE,
         )
@@ -119,7 +94,11 @@ class QualityChecker:
 
         # Check default tags
         default_tags = self.style.get("tags", {}).get("default", [])
-        missing_defaults = [t for t in default_tags if t not in tags]
+        # Normalize: strip leading '#' from defaults for comparison
+        default_normalized = [t.lstrip("#") for t in default_tags]
+        missing_defaults = [
+            f"#{t}" for t in default_normalized if f"#{t}" not in tags
+        ]
         if missing_defaults:
             issues.append(f"Missing recommended tags: {missing_defaults}")
 

@@ -1,6 +1,8 @@
-"""CLI entry point for xhs-loop-engineer."""
+"""Package entry point — delegates to cli.main()."""
 
-from loop import main
+import sys
+
+from cli import main
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -12,11 +12,10 @@ Modes:
 
 import yaml
 import json
-import argparse
-import os
 from pathlib import Path
 from datetime import datetime
 
+from agents import detect_article_type
 from agents.topic_finder import TopicFinder
 from agents.content_writer import ContentWriter
 from agents.quality_checker import QualityChecker
@@ -105,14 +104,7 @@ class XHSLoopEngineer:
     ) -> dict:
         """Run Agent 2: Content Writer (with LLM backend)."""
         if article_type is None:
-            article_type = (
-                "deep_tech"
-                if any(
-                    kw in topic.lower()
-                    for kw in ["源码", "架构", "深度", "拆解", "技术"]
-                )
-                else "xiaobai"
-            )
+            article_type = detect_article_type(topic)
 
         print(f"\n✍️  Agent 2: Content Generation ({self.backend})...")
         print(f"   Topic: {topic}")
@@ -298,89 +290,3 @@ class XHSLoopEngineer:
         if self.mode == "auto":
             return self.run_auto()
         return self.run_interactive()
-
-
-# ── CLI ───────────────────────────────────────────────────────────
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="XHS Loop Engineer — Xiaohongshu content automation"
-    )
-    parser.add_argument(
-        "--mode",
-        choices=["interactive", "auto"],
-        default="interactive",
-        help="Run mode (default: interactive)",
-    )
-    parser.add_argument(
-        "--backend",
-        choices=["manual", "anthropic", "openai"],
-        default="manual",
-        help="LLM backend (default: manual)",
-    )
-    parser.add_argument(
-        "--model",
-        type=str,
-        default=None,
-        help="Model name (e.g., claude-sonnet-4-6, gpt-4o)",
-    )
-    parser.add_argument(
-        "--config",
-        type=str,
-        default="config/schedule.yaml",
-        help="Path to config file",
-    )
-    parser.add_argument(
-        "--topic",
-        type=str,
-        default=None,
-        help="Skip topic discovery and use this topic directly",
-    )
-    parser.add_argument(
-        "--type",
-        dest="article_type",
-        choices=["xiaobai", "deep_tech"],
-        default=None,
-        help="Article type (auto-detected if not specified)",
-    )
-
-    args = parser.parse_args()
-
-    loop = XHSLoopEngineer(
-        config_path=args.config,
-        mode=args.mode,
-        backend=args.backend,
-        model=args.model,
-    )
-
-    # Fast path: --topic provided
-    if args.topic:
-        print(f"⚡ Fast path: generating for '{args.topic}'")
-        article_type = args.article_type or (
-            "deep_tech"
-            if any(
-                kw in args.topic.lower()
-                for kw in ["源码", "架构", "深度", "拆解", "技术"]
-            )
-            else "xiaobai"
-        )
-        gen_result = loop.step_3_generate(args.topic, article_type)
-        if gen_result.get("content"):
-            content = gen_result["content"]
-        else:
-            content = loop.step_3_manual_input()
-
-        verify = loop.step_4_verify(content, article_type)
-        if verify["pass"]:
-            loop.step_5_archive(content, args.topic, article_type)
-        else:
-            print("\n⚠️  Content did not pass verification:")
-            for issue in verify["issues"]:
-                print(f"   - {issue}")
-        return
-
-    loop.run()
-
-
-if __name__ == "__main__":
-    main()
