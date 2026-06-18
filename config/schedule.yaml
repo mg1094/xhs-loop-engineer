@@ -1,0 +1,23 @@
+# 发布计划
+
+schedule:
+  frequency: "每周 2-3 篇"
+  days: ["周一", "周三", "周五"]
+  time: "19:00-21:00"
+  timezone: "Asia/Shanghai"
+
+article_mix:
+  xiaobai: 2    # 小白文每周 2 篇
+  deep_tech: 1  # 技术深度稿每周 1 篇
+
+obsidian:
+  vault_path: "/Users/mac/Documents/Obsidian Vault"
+  content_dir: "小红书"
+  published_dir: "小红书/01-已发文章"
+  topics_file: "小红书/选题库.md"
+  dashboard_file: "小红书/数据看板.md"
+
+notification:
+  method: "desktop"
+  title_template: "📝 小红书新稿子已生成"
+  body_template: "选题：{topic}\n字数：{word_count}\n位置：Obsidian → 小红书/待发布/"
